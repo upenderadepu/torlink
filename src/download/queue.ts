@@ -150,12 +150,14 @@ export class DownloadQueue extends EventEmitter {
   /**
    * Start queued torrents (oldest first) while download slots are free. Called
    * whenever a slot opens up — a download finishes, fails, is paused, or is
-   * cancelled. No-op when unlimited (this.maxDownloads === 0), since nothing queues.
+   * cancelled. With no cap (maxDownloads 0) nothing queues in-session, but
+   * persisted "queued" items from an earlier capped run must still start, so
+   * 0 means no ceiling here rather than an early return.
    */
   private promote(): void {
-    if (this.maxDownloads === 0) return;
+    const cap = this.maxDownloads === 0 ? Infinity : this.maxDownloads;
     let started = false;
-    while (this.activeCount < this.maxDownloads) {
+    while (this.activeCount < cap) {
       const next = [...this.items.values()]
         .filter((it) => it.status === "queued")
         .sort((a, b) => a.addedAt - b.addedAt)[0];

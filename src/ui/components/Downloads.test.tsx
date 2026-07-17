@@ -117,3 +117,22 @@ describe("Downloads clear/remove keys", () => {
     expect(u.frame()).toContain("Recently downloaded  (3)");
   });
 });
+
+describe("Downloads queued rows", () => {
+  it("renders a waiting item as queued, not failed", async () => {
+    const queued: QueueItem = {
+      ...activeItem("q2", "kubuntu 25.10 iso"),
+      status: "queued",
+      progress: 0,
+      downloadedBytes: 0,
+      speed: 0,
+      peers: 0,
+      eta: undefined,
+    };
+    const u = mount([queued], []);
+    await vi.waitFor(() => expect(u.frame()).toContain("kubuntu 25.10"));
+    expect(u.frame()).toContain("queued  0%");
+    expect(u.frame()).not.toContain("failed");
+    expect(lineWith(u, "kubuntu 25.10")).toContain("·");
+  });
+});

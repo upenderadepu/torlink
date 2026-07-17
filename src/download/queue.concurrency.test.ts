@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { DownloadQueue } from "./queue";
+import type { QueueItem } from "./types";
 
 // Stub the engine (same approach as queue.add.test.ts) so these tests cover the
 // queue's own concurrency bookkeeping without touching webtorrent/the network.
@@ -72,6 +73,28 @@ describe("DownloadQueue concurrent-download cap (TORLINK_MAX_DOWNLOADS)", () => 
     q.restore(persisted);
     expect(q.activeCount).toBe(2);
     expect(statuses(q)[mk(3).id]).toBe("queued");
+    q.suspend();
+  });
+
+  it("starts persisted queued items on restore when the cap is unset", () => {
+    const persisted = [1, 2, 3].map(
+      (n): QueueItem => ({
+        ...mk(n),
+        source: undefined,
+        dir: "/d",
+        status: n === 1 ? "downloading" : "queued",
+        progress: 0,
+        totalBytes: 0,
+        downloadedBytes: 0,
+        speed: 0,
+        peers: 0,
+        addedAt: n,
+      }),
+    );
+    const q = new DownloadQueue({ maxDownloads: 0 });
+    q.restore(persisted);
+    expect(q.activeCount).toBe(3);
+    expect(Object.values(statuses(q)).every((v) => v === "downloading")).toBe(true);
     q.suspend();
   });
 });
