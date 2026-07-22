@@ -7,6 +7,13 @@ import { DownloadQueue } from "../download/queue";
 import { loadQueue, loadSeeds } from "../download/persist";
 import { loadHistory } from "../download/history";
 import { reconcileQueue } from "../download/reconcile";
+import {
+  BOOT_SETTLE_MS,
+  armBootMarker,
+  disarmBootMarker,
+  wasBootInterrupted,
+} from "../download/bootguard";
+import { logCrash } from "../util/crashlog";
 import { parseInput } from "../sources/magnet";
 import { magnetFromTorrentFile } from "../sources/torrentFile";
 import { readClipboard, writeClipboard } from "../util/clipboard";
@@ -101,6 +108,7 @@ export function App({
   const [lastDownloadToDir, setLastDownloadToDir] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
+  const [recovered, setRecovered] = useState(false);
   const booting = useRef(false);
 
   useEffect(() => {
@@ -111,15 +119,34 @@ export function App({
       const cfg = await loadConfig();
       const q = new DownloadQueue();
       q.setTrackers(cfg.trackers);
-      q.restore(reconcileQueue(await loadQueue()));
-      q.restoreHistory(await loadHistory());
-      q.restoreSeeds(await loadSeeds());
+      // Crash-boot breaker: a marker left behind by the previous boot means it
+      // died mid-restore, so this one restores everything paused with the
+      // engine cold (safe mode) instead of walking into the same explosion.
+      const safeBoot = wasBootInterrupted();
+      armBootMarker();
+      // One fail-safe around the whole restore, holding a single invariant: the
+      // app always reaches a usable screen. Nothing below throws today (every
+      // loader falls back to empty state and the engine calls are guarded), but
+      // a future one that did would otherwise strand the boot on the loading
+      // spinner, which is the worst failure this app has.
+      try {
+        q.restore(reconcileQueue(await loadQueue()), { safe: safeBoot });
+        q.restoreHistory(await loadHistory());
+        q.restoreSeeds(await loadSeeds(), { safe: safeBoot });
+      } catch (e) {
+        logCrash("boot-restore", e);
+      }
+      setTimeout(disarmBootMarker, BOOT_SETTLE_MS).unref();
       if (!alive) {
         q.suspend();
         return;
       }
       setConfigState(cfg);
       setQueue(q);
+      if (safeBoot) {
+        setRecovered(true);
+        setNotice("Recovered from a crashed start · downloads paused");
+      }
       const launch = initialMagnet
         ? parseInput(initialMagnet)
         : initialTorrent
@@ -532,7 +559,7 @@ export function App({
     return (
       <StoreContext.Provider value={store}>
         <TabTitle />
-        <Splash updateVersion={updateVersion} />
+        <Splash updateVersion={updateVersion} recovered={recovered} />
       </StoreContext.Provider>
     );
   }
